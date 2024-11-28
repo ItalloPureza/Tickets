@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Validação de CNPJs</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    h1 {
+      text-align: center;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+    }
+    .file-input {
+      margin: 20px 0;
+    }
+    select {
+      margin: 10px 0;
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    button {
+      display: block;
+      width: 100%;
+      padding: 10px;
+      background-color: #007BFF;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    .output {
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Validação de CNPJs</h1>
+  <div class="container">
+    <div class="file-input">
+      <label for="csvFile">Carregar arquivo CSV:</label>
+      <input type="file" id="csvFile" accept=".csv" />
+    </div>
+    <div id="columnMapping" style="display: none;">
+      <label>Selecione as colunas:</label>
+      <div>
+        <label for="ticketColumn">Número do Ticket:</label>
+        <select id="ticketColumn"></select>
+      </div>
+      <div>
+        <label for="dateColumn">Data de Abertura:</label>
+        <select id="dateColumn"></select>
+      </div>
+      <div>
+        <label for="responsibleColumn">Nome do Responsável:</label>
+        <select id="responsibleColumn"></select>
+      </div>
+      <div>
+        <label for="cnpjColumn">CNPJ:</label>
+        <select id="cnpjColumn"></select>
+      </div>
+      <button id="analyzeButton">Analisar</button>
+    </div>
+    <div class="output" id="output"></div>
+  </div>
+
+  <script>
+    const csvFileInput = document.getElementById('csvFile');
+    const columnMappingDiv = document.getElementById('columnMapping');
+    const analyzeButton = document.getElementById('analyzeButton');
+    const outputDiv = document.getElementById('output');
+    const ticketSelect = document.getElementById('ticketColumn');
+    const dateSelect = document.getElementById('dateColumn');
+    const responsibleSelect = document.getElementById('responsibleColumn');
+    const cnpjSelect = document.getElementById('cnpjColumn');
+
+    let csvHeaders = [];
+    let csvData = [];
+
+    csvFileInput.addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const content = e.target.result;
+          const rows = content.split('\n').map(row => row.split(','));
+          csvHeaders = rows[0];
+          csvData = rows.slice(1).filter(row => row.length === csvHeaders.length);
+
+          populateSelects(csvHeaders);
+          columnMappingDiv.style.display = 'block';
+        };
+        reader.readAsText(file);
+      }
+    });
+
+    function populateSelects(headers) {
+      const selects = [ticketSelect, dateSelect, responsibleSelect, cnpjSelect];
+      selects.forEach(select => {
+        select.innerHTML = '';
+        headers.forEach((header, index) => {
+          const option = document.createElement('option');
+          option.value = index;
+          option.textContent = header.trim();
+          select.appendChild(option);
+        });
+      });
+    }
+
+    analyzeButton.addEventListener('click', () => {
+      const ticketIndex = parseInt(ticketSelect.value);
+      const dateIndex = parseInt(dateSelect.value);
+      const responsibleIndex = parseInt(responsibleSelect.value);
+      const cnpjIndex = parseInt(cnpjSelect.value);
+
+      const processedData = csvData.map(row => ({
+        ticket: row[ticketIndex].trim(),
+        date: row[dateIndex].split(' ')[0].trim(),
+        responsible: row[responsibleIndex].trim(),
+        cnpjs: cleanCNPJs(row[cnpjIndex])
+      }));
+
+      generateAnalysis(processedData);
+    });
+
+    // Função para limpar e separar os CNPJs
+    function cleanCNPJs(cnpjCell) {
+      if (!cnpjCell) return [];
+      return [...new Set(cnpjCell.split(',').map(cnpj => cnpj.trim()))]; // Remover duplicatas
+    }
+
+    function generateAnalysis(processedData) {
+      const cnpjCounts = {};
+
+      processedData.forEach(({ cnpjs, ticket, responsible }) => {
+        cnpjs.forEach(cnpj => {
+          if (!cnpjCounts[cnpj]) {
+            cnpjCounts[cnpj] = { count: 0, tickets: [], responsibles: new Set() };
+          }
+          cnpjCounts[cnpj].count++;
+          cnpjCounts[cnpj].tickets.push(Number(ticket));
+          cnpjCounts[cnpj].responsibles.add(responsible);
+        });
+      });
+
+      const cnpjsWithThreeOrMore = Object.entries(cnpjCounts)
+        .filter(([, details]) => details.count >= 3)
+        .map(([cnpj, details]) => ({
+          cnpj,
+          count: details.count,
+          highestTicket: Math.max(...details.tickets),
+          responsibles: [...details.responsibles],
+        }));
+
+      if (!cnpjsWithThreeOrMore.length) {
+        alert('Nenhum CNPJ com 3 ou mais ocorrências encontrado.');
+        return;
+      }
+
+      const analystReport = {};
+      cnpjsWithThreeOrMore.forEach(({ highestTicket, responsibles }) => {
+        responsibles.forEach(responsible => {
+          if (!analystReport[responsible]) {
+            analystReport[responsible] = { count: 0, tickets: new Set() };
+          }
+          analystReport[responsible].count++;
+          analystReport[responsible].tickets.add(highestTicket);
+        });
+      });
+
+      const csvData = Object.entries(analystReport).map(([responsible, details]) => {
+        const ticketsArray = Array.from(details.tickets).sort((a, b) => b - a);
+        return [responsible, details.count, ...ticketsArray];
+      });
+
+      generateCSV(csvData);
+    }
+
+    function generateCSV(data) {
+      const maxTickets = Math.max(...data.map(row => row.length - 2));
+      const headers = ['ANALISTA', 'QTD VEZES', ...Array(maxTickets).fill().map((_, i) => `TICKET ${i + 1}`)];
+      const csvContent = [
+        headers.join(','),
+        ...data.map(row => [
+          ...row,
+          ...Array(maxTickets - (row.length - 2)).fill('')
+        ].join(',')),
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'cnpj_analysis.csv';
+      link.click();
+    }
+  </script>
+</body>
+</html>
